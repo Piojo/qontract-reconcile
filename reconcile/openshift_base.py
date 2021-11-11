@@ -94,7 +94,10 @@ def init_specs_to_fetch(ri: ResourceInventory, oc_map: OC_Map,
                 # managed_resource_name of each managed type
                 if mrn['resource'] in managed_types:
                     resource_names[mrn['resource']] = mrn['resourceNames']
-                else:
+                elif not override_managed_types:
+                    # Unless the integration is explicit about
+                    # resource names it cares about this is a
+                    # configuration error
                     raise KeyError(
                         f"Non-managed resource {mrn} listed on "
                         f"{cluster}/{namespace}"
