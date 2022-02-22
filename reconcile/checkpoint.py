@@ -9,15 +9,15 @@ import re
 from functools import partial
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Union
+from typing import Any, Iterable, Mapping, Optional, Union
 
 import requests
 from jinja2 import Template
 from jira import Issue
 
+from reconcile import queries
 from reconcile.utils.constants import PROJ_ROOT
 from reconcile.utils.jira_client import JiraClient
-
 
 DEFAULT_CHECKPOINT_LABELS = ("sre-checkpoint",)
 
@@ -29,6 +29,10 @@ MAX_EMAIL_ADDRESS_LENGTH = 320  # Per RFC3696
 MISSING_DATA_TEMPLATE = (
     PROJ_ROOT / "templates" / "jira-checkpoint-missinginfo.j2"
 )
+
+
+class NowhereToReportError(Exception):
+    pass
 
 
 def url_makes_sense(url: str) -> bool:
@@ -104,13 +108,41 @@ def file_ticket(
     return i
 
 
+def adjust_and_report_jira_board(
+    board_info: Mapping[str, Any],
+    override_board: Optional[str],
+    override_jira: Optional[str],
+) -> dict[str, Any]:
+    """Override a JIRA board, cutting a ticket if necessary."""
+    if not board_info:
+        msg = "Missing JIRA information from the service."
+        if not override_jira:
+            msg += (
+                " You need to specify a path to a JIRA board in app-interface."
+            )
+        if not override_board:
+            msg += " You need to specify a board name"
+        if not override_jira or not override_board:
+            raise NowhereToReportError(msg)
+    if override_jira and override_board:
+        board = queries.get_simple_jira_boards(override_jira)
+        if not board:
+            raise ValueError(
+                f"Path {override_jira} can't be used for this service"
+            )
+        board[0]["name"] = override_board
+        return board[0]
+    return board_info
+
+
 def report_invalid_metadata(
     app: Mapping[str, Any],
     path: str,
-    board: Mapping[str, Union[str, Mapping]],
     settings: Mapping[str, Any],
     parent: str,
     dry_run: bool = False,
+    override_board: Optional[str] = None,
+    override_jiradef: Optional[str] = None,
 ) -> None:
     """Cut tickets for any missing/invalid field in the app.
 
@@ -121,9 +153,6 @@ def report_invalid_metadata(
 
     :param path: path in app-interface to said app
 
-    :param board: JIRA board description, as per
-    queries.JIRA_BOARDS_QUERY
-
     :param settings: app-interface settings (necessary to log into the
     JIRA instance)
 
@@ -131,12 +160,17 @@ def report_invalid_metadata(
 
     :param dry_run: whether this is a dry run
     """
+
+    board = app["escalationPolicy"]["channels"]["jiraBoard"]
+    #         board = adjust_and_report_jira_board(board, override_board, override_jira)
+    #     except ValueError:
+
     if dry_run:
         do_cut = partial(
             render_template,  # type: ignore
-            template=MISSING_DATA_TEMPLATE,
             name=app["name"],
             path=path,
+            template=MISSING_DATA_TEMPLATE,
         )
     else:
         jira = JiraClient(board, settings)

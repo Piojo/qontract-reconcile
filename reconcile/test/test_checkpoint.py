@@ -3,6 +3,7 @@ from http import HTTPStatus
 import pytest
 import reconcile.checkpoint as sut
 import requests
+from reconcile import queries
 
 
 @pytest.fixture
@@ -85,6 +86,9 @@ def app_metadata():
     Returns the app structure and whether we expect it to have a
     ticket associated with it
     """
+    escalation = {
+        "channels": {"jiraBoard": [{"name": "aboard", "url": "http://jira"}]}
+    }
     return [
         (
             {
@@ -92,6 +96,7 @@ def app_metadata():
                 "sopsUrl": "https://www.somewhe.re",
                 "architectureDocument": "https://www.hereand.now",
                 "grafanaUrls": [],
+                "escalationPolicy": escalation,
             },
             False,
         ),
@@ -101,6 +106,7 @@ def app_metadata():
                 "name": "appname",
                 "sopsUrl": "https://www.somewhe.re",
                 "grafanaUrls": [],
+                "escalationPolicy": escalation,
             },
             True,
         ),
@@ -111,6 +117,7 @@ def app_metadata():
                 "architectureDocument": "",
                 "grafanaUrls": [],
                 "sopsUrl": "http://www.herea.nd",
+                "escalationPolicy": escalation,
             },
             True,
         ),
@@ -132,7 +139,14 @@ def test_report_invalid_metadata(mocker, app, needs_ticket):
         "grafanaUrls": lambda _: True,
     }
 
-    sut.report_invalid_metadata(app, "/a/path", "jiraboard", {}, "TICKET-123")
+    sut.report_invalid_metadata(
+        app=app,
+        path="/a/path",
+        settings={},
+        override_board="jiraboard",
+        override_jiradef="/a/jira/path",
+        parent="TICKET-123",
+    )
     if needs_ticket:
         filer.assert_called_once_with(
             jira=jira.return_value,
@@ -167,3 +181,64 @@ def test_report_invalid_metadata_dry_run(mocker, app, needs_ticket):
     else:
         renderer.assert_not_called()
     sut.VALIDATORS = valid
+
+
+@pytest.fixture
+def mock_queried_jira():
+    return [{"name": "boardname", "url": "http://ticketing"}]
+
+
+BOARD_METADATA = [
+    (None, None, None, sut.NowhereToReportError),
+    (
+        None,
+        "/a/jira/path",
+        "jiraboard",
+        {"name": "jiraboard", "url": "http://ticketing"},
+    ),
+    (
+        {"name": "defaultname", "url": "http://jira"},
+        "/a/jira/path",
+        "jiraboard",
+        {"name": "jiraboard", "url": "http://ticketing"},
+    ),
+    (
+        {"name": "defaultname", "url": "http://jira"},
+        None,
+        None,
+        {"name": "defaultname", "url": "http://jira"},
+    ),
+    (None, "/a/jira/path", None, sut.NowhereToReportError),
+]
+
+
+@pytest.mark.parametrize("app_board,jiradef,jiraboard,result", BOARD_METADATA)
+def test_valid_jira_transforms(
+    """A docstring."""
+    app_board, jiradef, jiraboard, result, mocker, mock_queried_jira
+):
+    q = mocker.patch.object(
+        queries, "get_simple_jira_boards", return_value=mock_queried_jira
+    )
+
+    if isinstance(result, dict):
+        rs = sut.adjust_and_report_jira_board(app_board, jiraboard, jiradef)
+        assert rs == result
+        if jiradef:
+            q.assert_called_once_with(jiradef)
+    else:
+        with pytest.raises(result):
+            sut.adjust_and_report_jira_board(app_board, jiraboard, jiradef)
+            q.assert_not_called()
+
+
+def test_not_found_override(mocker):
+    q = mocker.patch.object(queries, "get_simple_jira_boards", return_value=[])
+
+    with pytest.raises(ValueError):
+        sut.adjust_and_report_jira_board(
+            {"url": "http://jira", "name": "aname"},
+            "boardname",
+            "/a/jira/path",
+        )
+    q.assert_called_once_with("/a/jira/path")
