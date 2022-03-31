@@ -52,7 +52,7 @@ setup(
         "openshift>=0.11.2",
         "websocket-client<0.55.0,>=0.35",
         "sshtunnel>=0.4.0",
-        "croniter>=1.0.15,<1.1.0",
+        "croniter>=1.0.15,<1.4.0",
         "dyn~=1.8.1",
         "transity-statuspageio>=0.0.3,<0.1",
         "pydantic~=1.9.0",
