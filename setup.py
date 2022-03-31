@@ -45,7 +45,7 @@ setup(
         "sentry-sdk~=0.14",
         "jenkins-job-builder~=3.12.0",
         "parse==1.18.0",
-        "sendgrid>=6.4.8,<6.5.0",
+        "sendgrid>=6.4.8,<6.10.0",
         "dnspython~=2.1",
         "requests==2.22.0",
         "kubernetes~=12.0",
